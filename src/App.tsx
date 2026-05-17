@@ -7,11 +7,11 @@ import { Activity, Award, Gauge, Home, Languages, PlaneTakeoff, RotateCcw, Ruler
 type Mode = 'distance' | 'airtime' | 'precision';
 type Lang = 'zh' | 'en' | 'both';
 type FlightStatus = 'ready' | 'flying' | 'landed';
-type Params = { wingArea: number; centerOfGravity: number; foldAngle: number; winglets: boolean; throwPower: number; launchAngle: number; launchDirection: number };
+type Params = { wingArea: number; centerOfGravity: number; foldAngle: number; winglets: boolean; throwPower: number; launchAngle: number; launchDirection: number; windSpeed: number; windDirection: number };
 type TargetPoint = { distance: number; offset: number };
 type Result = { distance: number; airTime: number; stability: number; lift: number; drag: number; accuracy: number; totalScore: number; grade: 'S' | 'A' | 'B' | 'C' | 'D'; landingX: number; landingZ: number; targetX: number; targetZ: number; stallRisk: number; coach: string[]; analysis: string };
 
-const defaultParams: Params = { wingArea: 58, centerOfGravity: 48, foldAngle: 38, winglets: true, throwPower: 72, launchAngle: 27, launchDirection: 0 };
+const defaultParams: Params = { wingArea: 58, centerOfGravity: 48, foldAngle: 38, winglets: true, throwPower: 72, launchAngle: 27, launchDirection: 0, windSpeed: 0, windDirection: 0 };
 const storageKey = 'aerofold-best-records';
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const round = (value: number, digits = 1) => Number(value.toFixed(digits));
@@ -24,6 +24,9 @@ const copy = {
   subtitle: pair('7eb8 98de 673a 5de5 7a0b 5e08 822a 7a7a 6559 80b2 6c99 76d2', 'Paper Airplane Engineer aviation sandbox'),
   controls: pair('673a 4f53 53c2 6570', 'Airframe Controls'),
   controlsSub: pair('8c03 6574 6298 53e0 3001 91cd 5fc3 548c 53d1 5c04 59ff 6001', 'Tune folds, force, and launch attitude'),
+  environment: pair('73af 5883 53c2 6570', 'Environment Controls'),
+  windSpeed: pair('98ce 901f', 'Wind Speed'),
+  windDirection: pair('98ce 5411', 'Wind Direction'),
   simulator: pair('33 44 20 98de 884c 5b9e 9a8c 573a', '3D Flight Simulator'),
   simulatorSub: pair('5b9e 65f6 673a 4f53 9884 89c8 3001 7a7a 95f4 822a 8ff9 548c 76ee 6807 533a', 'Live preview, spatial flight path, and target area'),
   model: pair('7eb8 98de 673a 6a21 578b 9884 89c8', 'Paper Airplane Model'),
@@ -79,17 +82,27 @@ function simulate(params: Params, mode: Mode, lang: Lang, targetPoint: TargetPoi
   const fold = params.foldAngle / 70;
   const cgOffset = Math.abs(params.centerOfGravity - 48) / 48;
   const sweetLaunch = 1 - Math.abs(params.launchAngle - 26) / 35;
+  const windSpeedNorm = params.windSpeed / 100;
+  const windDirRad = THREE.MathUtils.degToRad(params.windDirection);
+  
   const lift = clamp(38 + wing * 42 + sweetLaunch * 16 - Math.max(0, fold - 0.68) * 16, 0, 100);
   const drag = clamp(18 + wing * 22 + fold * 34 + (params.winglets ? 6 : 0), 0, 100);
   const stability = clamp(98 - cgOffset * 95 - Math.max(0, params.foldAngle - 48) * 1.15 + (params.winglets ? 13 : -8), 0, 100);
   const stallRisk = clamp((params.launchAngle - 31) * 2.2 + (params.foldAngle - 48) * 1.1 - stability * 0.18, 0, 100);
   const efficiency = clamp(lift * 0.74 + stability * 0.38 - drag * 0.45 - stallRisk * 0.34, 8, 100);
-  const distance = clamp(power * 72 + angle * 19 + efficiency * 0.82 - drag * 0.18, 8, 112);
-  const airTime = clamp(0.65 + wing * 2.4 + angle * 1.8 + stability * 0.018 - drag * 0.012 - stallRisk * 0.018, 0.7, 6.2);
+  
+  // 风对飞行的影响
+  const windX = Math.cos(windDirRad) * windSpeedNorm;
+  const windZ = Math.sin(windDirRad) * windSpeedNorm;
+  const windEffect = windSpeedNorm * (1 + lift / 100);
+  
+  const distance = clamp(power * 72 + angle * 19 + efficiency * 0.82 - drag * 0.18 + windX * 25, 8, 112);
+  const airTime = clamp(0.65 + wing * 2.4 + angle * 1.8 + stability * 0.018 - drag * 0.012 - stallRisk * 0.018 + windX * 0.8, 0.7, 6.2);
+  
   const targetX = mode === 'precision' ? targetPoint.distance : mode === 'distance' ? 92 : 72;
   const targetZ = mode === 'precision' ? targetPoint.offset : -2.2;
   const landingX = clamp(distance, 8, 112);
-  const landingZ = clamp(-2.2 + Math.tan(THREE.MathUtils.degToRad(params.launchDirection)) * (distance / 9.5), -7.8, 7.8);
+  const landingZ = clamp(-2.2 + Math.tan(THREE.MathUtils.degToRad(params.launchDirection)) * (distance / 9.5) + windZ * 15, -7.8, 7.8);
   const missDistance = Math.hypot(landingX - targetX, (landingZ - targetZ) * 8);
   const accuracy = clamp(100 - missDistance * 2.15 - Math.abs(params.launchAngle - 24) * 0.5, 0, 100);
   const rawScore = mode === 'distance'
@@ -201,6 +214,12 @@ function Controls({ params, update, reset, lang }: { params: Params; update: <K 
         <Slider label={L(lang, pair('6295 63b7 529b 91cf', 'Throw Power'))} value={params.throwPower} min={25} max={100} unit="%" onChange={(value) => update('throwPower', value)} />
         <Slider label={L(lang, pair('53d1 5c04 89d2', 'Launch Angle'))} value={params.launchAngle} min={8} max={45} unit="deg" onChange={(value) => update('launchAngle', value)} />
         <Slider label={L(lang, pair('6295 63b7 65b9 5411', 'Throw Direction'))} value={params.launchDirection} min={-28} max={28} unit="deg" onChange={(value) => update('launchDirection', value)} />
+        
+        <div className="mt-4 pt-4 border-t border-slate-200">
+          <h3 className="text-sm font-semibold text-[#092047] mb-3">{L(lang, copy.environment)}</h3>
+          <Slider label={L(lang, copy.windSpeed)} value={params.windSpeed} min={0} max={50} unit="%" onChange={(value) => update('windSpeed', value)} />
+          <Slider label={L(lang, copy.windDirection)} value={params.windDirection} min={-180} max={180} unit="°" onChange={(value) => update('windDirection', value)} />
+        </div>
       </div>
     </aside>
   );
@@ -235,7 +254,8 @@ function ModelPreview3D({ params, lang }: { params: Params; lang: Lang }) {
 }
 
 function FlightScene3D({ params, result, runId, lang, zoom, landed, showTarget, setTargetPoint }: { params: Params; result: Result; runId: number; lang: Lang; zoom: number; landed: boolean; showTarget: boolean; setTargetPoint: (point: TargetPoint) => void }) {
-  return <Canvas onContextMenu={(event) => event.preventDefault()} camera={{ position: [9, 7, 13], fov: 45 }} shadows dpr={[1, 1.6]}><CameraRig zoom={zoom} /><color attach="background" args={['#f8fcff']} /><ambientLight intensity={0.8} /><directionalLight castShadow position={[8, 12, 6]} intensity={1.5} /><fog attach="fog" args={['#f8fcff', 16, 34]} /><Grid args={[24, 18]} cellSize={1} cellThickness={0.6} cellColor="#bfdbfe" sectionSize={4} sectionThickness={1.2} sectionColor="#60a5fa" position={[0, -0.02, 0]} />{showTarget && <TargetZone x={mapDistance(result.targetX)} z={result.targetZ} label={L(lang, pair('76ee 6807', 'TARGET'))} color="#10b981" setTargetPoint={setTargetPoint} />}{landed && <LandingMarker x={mapDistance(result.landingX)} z={result.landingZ} runId={runId} label={L(lang, pair('964d 843d 70b9', 'LANDING'))} />}<FlightArc result={result} reveal={landed ? 1 : 0.42} soft={!landed} /><FlyingPaperPlane params={params} result={result} runId={runId} /><Text position={[-9.2, 0.1, 4.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.35} color="#075985">{L(lang, pair('53d1 5c04 533a', 'LAUNCH'))}</Text><OrbitControls makeDefault enableZoom enablePan={false} minDistance={7} maxDistance={24} maxPolarAngle={Math.PI / 2.05} /></Canvas>;
+  const actualLanding = getActualLandingPosition(result, params);
+  return <Canvas onContextMenu={(event) => event.preventDefault()} camera={{ position: [9, 7, 13], fov: 45 }} shadows dpr={[1, 1.6]}><CameraRig zoom={zoom} /><color attach="background" args={['#f8fcff']} /><ambientLight intensity={0.8} /><directionalLight castShadow position={[8, 12, 6]} intensity={1.5} /><fog attach="fog" args={['#f8fcff', 16, 34]} /><Grid args={[24, 18]} cellSize={1} cellThickness={0.6} cellColor="#bfdbfe" sectionSize={4} sectionThickness={1.2} sectionColor="#60a5fa" position={[0, -0.02, 0]} />{showTarget && <TargetZone x={mapDistance(result.targetX)} z={result.targetZ} label={L(lang, pair('76ee 6807', 'TARGET'))} color="#10b981" setTargetPoint={setTargetPoint} />}{landed && <LandingMarker x={actualLanding.x} z={actualLanding.z} runId={runId} label={L(lang, pair('964d 843d 70b9', 'LANDING'))} />}<FlightArc result={result} reveal={landed ? 1 : 0.42} soft={!landed} params={params} /><FlyingPaperPlane params={params} result={result} runId={runId} /><WindIndicator params={params} /><Text position={[-9.2, 0.1, 4.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.35} color="#075985">{L(lang, pair('53d1 5c04 533a', 'LAUNCH'))}</Text><OrbitControls makeDefault enableZoom enablePan={true} minDistance={7} maxDistance={24} maxPolarAngle={Math.PI / 2.05} /></Canvas>;
 }
 
 function CameraRig({ zoom }: { zoom: number }) {
@@ -246,11 +266,24 @@ function CameraRig({ zoom }: { zoom: number }) {
 
 function mapDistance(distance: number) { return -9 + (clamp(distance, 0, 112) / 112) * 18; }
 function unmapDistance(x: number) { return clamp(((x + 9) / 18) * 112, 0, 112); }
-function arcPoint(result: Result, t: number) {
+function arcPoint(result: Result, t: number, params?: Params) {
   const start = new THREE.Vector3(-9, 0.35, 3.2);
   const end = new THREE.Vector3(mapDistance(result.landingX), 0.35, result.landingZ);
   const height = 2.2 + result.airTime * 0.45 + result.lift * 0.012;
-  return new THREE.Vector3(THREE.MathUtils.lerp(start.x, end.x, t), start.y + Math.sin(Math.PI * t) * height, THREE.MathUtils.lerp(start.z, end.z, t) + Math.sin(Math.PI * t * 2) * (100 - result.stability) * 0.018);
+  
+  let windOffset = new THREE.Vector3(0, 0, 0);
+  if (params) {
+    const windSpeedNorm = params.windSpeed / 100;
+    const windDirRad = THREE.MathUtils.degToRad(params.windDirection);
+    windOffset.x = Math.cos(windDirRad) * windSpeedNorm * 8 * t * t;
+    windOffset.z = Math.sin(windDirRad) * windSpeedNorm * 5 * t * t;
+  }
+  
+  return new THREE.Vector3(
+    THREE.MathUtils.lerp(start.x, end.x, t) + windOffset.x,
+    start.y + Math.sin(Math.PI * t) * height,
+    THREE.MathUtils.lerp(start.z, end.z, t) + Math.sin(Math.PI * t * 2) * (100 - result.stability) * 0.018 + windOffset.z
+  );
 }
 
 function FlyingPaperPlane({ params, result, runId }: { params: Params; result: Result; runId: number }) {
@@ -262,9 +295,9 @@ function FlyingPaperPlane({ params, result, runId }: { params: Params; result: R
     if (lastRun.current !== runId) { progress.current = 0; lastRun.current = runId; }
     if (runId > 0) progress.current = Math.min(1, progress.current + delta / 1.9);
     const t = runId > 0 ? progress.current : 0.08;
-    const p = arcPoint(result, t);
-    const before = arcPoint(result, Math.max(0, t - 0.025));
-    const after = arcPoint(result, Math.min(1, t + 0.025));
+    const p = arcPoint(result, t, params);
+    const before = arcPoint(result, Math.max(0, t - 0.025), params);
+    const after = arcPoint(result, Math.min(1, t + 0.025), params);
     const direction = after.clone().sub(before).normalize();
     group.current.position.copy(p);
     group.current.lookAt(p.clone().add(direction));
@@ -272,6 +305,49 @@ function FlyingPaperPlane({ params, result, runId }: { params: Params; result: R
     group.current.rotateZ((50 - result.stability) * 0.004 * Math.sin(t * Math.PI * 6));
   });
   return <group ref={group}><PaperAirplaneModel params={params} /></group>;
+}
+
+function WindIndicator({ params }: { params: Params }) {
+  const windSpeedNorm = params.windSpeed / 100;
+  const windDirRad = THREE.MathUtils.degToRad(params.windDirection);
+  
+  if (windSpeedNorm <= 0) return null;
+  
+  return (
+    <group position={[-7, 0.5, -5]}>
+      {/* 风向箭头 */}
+      <group rotation={[0, windDirRad, 0]}>
+        {/* 箭头主体 */}
+        <mesh position={[0, 0, 0]}>
+          <coneGeometry args={[0.2 + windSpeedNorm * 0.3, 0.8 + windSpeedNorm * 0.8, 8]} />
+          <meshStandardMaterial color="#3b82f6" />
+        </mesh>
+        
+        {/* 箭头基座 */}
+        <mesh position={[0, -0.4, 0]}>
+          <cylinderGeometry args={[0.15, 0.25, 0.3, 16]} />
+          <meshStandardMaterial color="#1e40af" />
+        </mesh>
+        
+        {/* 风尾效果 */}
+        {windSpeedNorm > 0.2 && (
+          <group position={[0, 0, -0.5 - windSpeedNorm * 0.8]}>
+            {[...Array(Math.floor(windSpeedNorm * 4) + 1)].map((_, i) => (
+              <mesh key={i} position={[0, 0, i * 0.4]}>
+                <ringGeometry args={[0.1 + i * 0.08, 0.15 + i * 0.1, 12]} />
+                <meshStandardMaterial color="#60a5fa" transparent opacity={0.5 - i * 0.1} />
+              </mesh>
+            ))}
+          </group>
+        )}
+      </group>
+      
+      {/* 风速显示 */}
+      <Text position={[0, 1.2, 0]} fontSize={0.25} color="#1e40af" anchorX="center">
+        {params.windSpeed}%
+      </Text>
+    </group>
+  );
 }
 
 function PaperAirplaneModel({ params }: { params: Params }) {
@@ -287,11 +363,11 @@ function PaperPanel({ points, color }: { points: [number, number, number][]; col
   return <mesh castShadow receiveShadow geometry={geometry}><meshStandardMaterial color={color} roughness={0.7} side={THREE.DoubleSide} /></mesh>;
 }
 
-function FlightArc({ result, reveal, soft }: { result: Result; reveal: number; soft: boolean }) {
+function FlightArc({ result, reveal, soft, params }: { result: Result; reveal: number; soft: boolean; params?: Params }) {
   const points = useMemo(() => {
     const count = Math.max(4, Math.round(64 * reveal));
-    return Array.from({ length: count }, (_, index) => arcPoint(result, (index / Math.max(1, count - 1)) * reveal));
-  }, [result, reveal]);
+    return Array.from({ length: count }, (_, index) => arcPoint(result, (index / Math.max(1, count - 1)) * reveal, params));
+  }, [result, reveal, params]);
   const geometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points]);
   const glow = useMemo(() => new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: '#60a5fa', transparent: true, opacity: soft ? 0.16 : 0.24 })), [geometry, soft]);
   const line = useMemo(() => new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: soft ? '#0ea5e9' : '#0877f2', transparent: true, opacity: soft ? 0.46 : 0.95, dashSize: soft ? 0.28 : 0.02, gapSize: soft ? 0.2 : 0.02 })), [geometry, soft]);
@@ -315,17 +391,23 @@ function LandingMarker({ x, z, runId, label }: { x: number; z: number; runId: nu
   return <group key={runId} position={[x, 0.04, z]}><mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.2, 0.38, 32]} /><meshBasicMaterial color="#f59e0b" transparent opacity={0.7} /></mesh><mesh position={[0, 0.45, 0]}><sphereGeometry args={[0.15, 24, 24]} /><meshStandardMaterial color="#f59e0b" /></mesh><Text position={[0, 0.85, 0]} fontSize={0.28} color="#b45309" anchorX="center">{label}</Text></group>;
 }
 
+function getActualLandingPosition(result: Result, params?: Params): { x: number; z: number } {
+  const point = arcPoint(result, 1, params);
+  return { x: point.x, z: point.z };
+}
+
 function Telemetry({ params, result, records, mode, status, lang }: { params: Params; result: Result; records: Record<Mode, number>; mode: Mode; status: FlightStatus; lang: Lang }) {
   const landed = status === 'landed';
   const statusText = status === 'flying' ? L(lang, pair('98de 884c 91c7 96c6 4e2d ff0c 843d 5730 540e 751f 6210 7ed3 679c', 'Recording flight data. Results appear after landing.')) : landed ? L(lang, pair('5df2 843d 5730 ff0c 6d4b 8bd5 62a5 544a 5df2 751f 6210', 'Landed. Test report generated.')) : L(lang, pair('7b49 5f85 53d1 5c04', 'Awaiting launch'));
   const metricValue = (value: string) => (landed ? value : '--');
+  const safeNumber = (value: number) => isNaN(value) ? '' : value;
   const metrics = [
-    { label: L(lang, pair('8ddd 79bb', 'Distance')), value: metricValue(`${result.distance} m`), score: landed ? result.distance : 0, icon: Ruler },
-    { label: L(lang, pair('6ede 7a7a', 'Air Time')), value: metricValue(`${result.airTime} s`), score: landed ? result.airTime * 16 : 0, icon: Timer },
-    { label: L(lang, pair('7a33 5b9a 6027', 'Stability')), value: metricValue(`${result.stability}%`), score: landed ? result.stability : 0, icon: Activity },
-    { label: L(lang, pair('5347 529b', 'Lift')), value: metricValue(`${result.lift}%`), score: landed ? result.lift : 0, icon: PlaneTakeoff },
-    { label: L(lang, pair('963b 529b', 'Drag')), value: metricValue(`${result.drag}%`), score: landed ? 100 - result.drag : 0, icon: Wind },
-    { label: L(lang, pair('7cbe 5ea6', 'Accuracy')), value: metricValue(`${result.accuracy}%`), score: landed ? result.accuracy : 0, icon: Target },
+    { label: L(lang, pair('8ddd 79bb', 'Distance')), value: metricValue(`${safeNumber(result.distance)} m`), score: landed ? result.distance : 0, icon: Ruler },
+    { label: L(lang, pair('6ede 7a7a', 'Air Time')), value: metricValue(`${safeNumber(result.airTime)} s`), score: landed ? result.airTime * 16 : 0, icon: Timer },
+    { label: L(lang, pair('7a33 5b9a 6027', 'Stability')), value: metricValue(`${safeNumber(result.stability)}%`), score: landed ? result.stability : 0, icon: Activity },
+    { label: L(lang, pair('5347 529b', 'Lift')), value: metricValue(`${safeNumber(result.lift)}%`), score: landed ? result.lift : 0, icon: PlaneTakeoff },
+    { label: L(lang, pair('963b 529b', 'Drag')), value: metricValue(`${safeNumber(result.drag)}%`), score: landed ? 100 - result.drag : 0, icon: Wind },
+    { label: L(lang, pair('7cbe 5ea6', 'Accuracy')), value: metricValue(`${safeNumber(result.accuracy)}%`), score: landed ? result.accuracy : 0, icon: Target },
   ];
   const coachItems = landed ? result.coach : [statusText];
   return <aside className="flex flex-col gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-[0_18px_60px_rgba(15,45,90,0.08)]"><div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#092047]">{L(lang, copy.telemetry)}</h2><p className="mt-1 text-sm text-slate-500">{L(lang, modeNames[mode])}</p></div><div className="grid h-16 w-16 place-items-center rounded-lg bg-[#092047] text-3xl font-black text-white shadow-lg shadow-slate-900/20">{landed ? result.grade : '-'}</div></div><div className="rounded-lg border border-blue-100 bg-blue-50 p-4"><div className="flex items-center justify-between"><span className="text-sm font-bold text-blue-900">{L(lang, copy.score)}</span><span className="text-3xl font-black text-[#075fd0]">{landed ? result.totalScore : '--'}</span></div><p className="mt-2 text-xs font-bold text-blue-700">{statusText}</p><div className="mt-3 h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-[#0877f2] meter-fill" style={{ width: `${landed ? result.totalScore : status === 'flying' ? 55 : 0}%` }} /></div></div><div className="grid grid-cols-2 gap-3">{metrics.map((metric) => { const Icon = metric.icon; return <div key={metric.label} className="rounded-lg border border-slate-200 bg-white p-3"><div className="mb-2 flex items-center justify-between text-slate-500"><Icon size={16} /><span className="text-[11px] font-bold uppercase tracking-normal">{metric.label}</span></div><p className="text-lg font-black text-[#092047]">{metric.value}</p><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-cyan-500 meter-fill" style={{ width: `${clamp(metric.score, 0, 100)}%` }} /></div></div>; })}</div><section className="rounded-lg border border-slate-200 bg-slate-50 p-4"><div className="mb-3 flex items-center gap-2"><Award size={17} className="text-amber-500" /><h3 className="text-sm font-bold text-slate-900">{L(lang, copy.records)}</h3></div><div className="flex items-center justify-between rounded-md bg-white px-3 py-3 text-sm shadow-sm"><span className="font-bold text-blue-700">{L(lang, modeNames[mode])}</span><span className="text-2xl font-black text-slate-900">{records[mode]}</span></div></section><section className="rounded-lg border border-blue-100 bg-[#f7fbff] p-4"><div className="mb-3 flex items-center gap-2"><Gauge size={17} className="text-blue-600" /><h3 className="text-sm font-bold text-slate-900">{L(lang, copy.coach)}</h3></div><ul className="space-y-2">{coachItems.map((tip) => <li key={tip} className="rounded-md bg-white px-3 py-2 text-sm font-medium leading-5 text-slate-600 shadow-sm">{tip}</li>)}</ul></section><section className="rounded-lg border border-slate-200 bg-white p-4"><h3 className="text-sm font-bold text-slate-900">{L(lang, copy.report)}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{landed ? result.analysis : L(lang, pair('843d 5730 540e 751f 6210 53c2 6570 3001 7ed3 679c 548c 6539 8fdb 5efa 8bae 3002', 'After landing, the report will include parameters, results, analysis, and improvement suggestions.'))}</p>{landed && <p className="mt-2 rounded-md bg-slate-50 px-3 py-2 text-sm font-semibold leading-5 text-slate-700">{L(lang, copy.next)}: {result.coach[0]}</p>}<div className="mt-3 grid grid-cols-2 gap-2 text-xs font-bold text-slate-500"><span>{L(lang, pair('7ffc 9762', 'Wing'))} {params.wingArea}%</span><span>CG {params.centerOfGravity}%</span><span>{L(lang, pair('6298 89d2', 'Fold'))} {params.foldAngle}deg</span><span>{L(lang, pair('529b 91cf', 'Power'))} {params.throwPower}%</span><span>{L(lang, pair('89d2 5ea6', 'Angle'))} {params.launchAngle}deg</span><span>{L(lang, pair('5c0f 7ffc', 'Winglets'))} {params.winglets ? 'On' : 'Off'}</span></div></section></aside>;
