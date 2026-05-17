@@ -94,7 +94,6 @@ function simulate(params: Params, mode: Mode, lang: Lang, targetPoint: TargetPoi
   // 风对飞行的影响
   const windX = Math.cos(windDirRad) * windSpeedNorm;
   const windZ = Math.sin(windDirRad) * windSpeedNorm;
-  const windEffect = windSpeedNorm * (1 + lift / 100);
   
   const distance = clamp(power * 72 + angle * 19 + efficiency * 0.82 - drag * 0.18 + windX * 25, 8, 112);
   const airTime = clamp(0.65 + wing * 2.4 + angle * 1.8 + stability * 0.018 - drag * 0.012 - stallRisk * 0.018 + windX * 0.8, 0.7, 6.2);
