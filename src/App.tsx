@@ -2,7 +2,7 @@ import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, OrbitControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { Activity, Award, Gauge, Home, Languages, PlaneTakeoff, RotateCcw, Ruler, Target, Timer, Wind, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, Award, Home, Languages, PlaneTakeoff, RotateCcw, Ruler, Target, Timer, Wind, ZoomIn, ZoomOut } from 'lucide-react';
 
 type Mode = 'distance' | 'airtime' | 'precision';
 type Lang = 'zh' | 'en' | 'both';
